@@ -1,4 +1,14 @@
+import os
+import re
+import sys
+import tempfile
 from argparse import SUPPRESS, ArgumentParser
+from getpass import getuser
+from json import dump
+from shutil import which
+from subprocess import PIPE, run
+
+from jupyter_client import kernelspec as ks
 
 
 def _assignment(s):
@@ -10,9 +20,122 @@ def _assignment(s):
     return s
 
 
-if __name__ == "__main__":
-    from .. import add_kernel
+def add_kernel(
+    host,
+    display_name,
+    remote_python_path,
+    local_python_path=sys.executable,
+    env=None,
+    sudo=False,
+    system=False,
+    timeout=5,
+    session=False,
+    echo=False,
+):
+    """
+    Add a new kernel specification for a remote kernel
 
+    Parameters
+    ----------
+    host: str
+        name of the host (as used from SSH)
+    display_name: str
+        label displayed so the user will recognize this kernel
+    remote_python_path: str
+        path to the remote python installation with ipykernel installed
+        (the python executable would be <PATH>/bin/python3)
+    local_python_path: str
+        path the the local python installation with sshpyk (the python executable would
+        be <PATH>/bin/python3)
+    env: [ str ]
+        list of environment variables to set (list of strings with the form
+        "<VARIABLE>=<VALUE>")
+    sudo: bool
+        indicates if the remote ipykernel should be started with sudo
+    system: bool
+        should the new kernel spec be created in the system area (True)
+        or user area (False)
+    timeout: int
+        SSH connection timeout
+    """
+    if env is None:
+        env = []
+
+    def simplify(name):
+        return re.sub(r"[^a-zA-Z0-9\-\_]", "", name)[:60]
+
+    ssh = which("ssh")
+
+    if ssh is None:
+        raise RuntimeError("could not find SSH executable ('ssh')")
+
+    # TODO: sanitize inputs if possible
+    rproc = run(  # noqa: S603
+        [ssh, host, f"file {remote_python_path}/bin/python"],
+        stdout=PIPE,
+        stderr=PIPE,
+    )
+    # TODO: should this be utf-8? (i.e. no argument)
+    output = rproc.stdout.decode("ASCII")
+
+    if len(output) == 0:
+        raise RuntimeError(f"could not reach '{host}' with ssh")
+
+    if "(No such file or directory)" in output:
+        raise RuntimeError(f"not found on {host}: {output}")
+
+    kernel_json = {
+        "argv": [
+            local_python_path,
+            "-m",
+            "sshpyk",
+            "--host",
+            host,
+            "--python",
+            remote_python_path,
+            "--timeout",
+            str(timeout),
+            "-f",
+            "{connection_file}",
+        ],
+        "display_name": display_name,
+        "language": "python",
+        # interrupt_mode="signal": process receives SIGINT, but in our case this will
+        # kill the local process and not the remote process, leaving a zombie process on
+        # the remote machine.
+        # interrupt_mode="message": remote process receives a message instructing it
+        # to interrupt the kernel.
+        # Tested with a remote ipython kernel in JupyterLab. Interrupt button works.
+        "interrupt_mode": "message",
+    }
+    if session:
+        kernel_json["argv"].insert(-2, "--session")
+    if echo:
+        kernel_json["argv"].insert(-2, "--echo")
+    if env:
+        kernel_json["argv"].insert(-2, "--env")
+        kernel_json["argv"].insert(-2, " ".join(env))
+
+    if sudo:
+        kernel_json["argv"].insert(-2, "-s")
+
+    kernel_name = f"ssh_{host}_{simplify(display_name)}"
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # TODO: check if permissions could be less permissive
+        os.chmod(temp_dir, 0o755)  # noqa: S103
+
+        with open(os.path.join(temp_dir, "kernel.json"), "w") as fd:
+            dump(kernel_json, fd, sort_keys=True, indent=2)
+
+        ks.install_kernel_spec(
+            temp_dir, kernel_name, user=False if system else getuser(), replace=True
+        )
+
+    return kernel_name
+
+
+if __name__ == "__main__":
     parse = ArgumentParser(add_help=False)
     optional = parse.add_argument_group("optional arguments")
 

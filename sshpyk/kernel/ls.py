@@ -1,8 +1,37 @@
+import json
 from argparse import SUPPRESS, ArgumentParser
-from os.path import exists
+from os.path import exists, join
 
-from .utils import kinfo_exe as _exe
-from .utils import rexists
+from jupyter_client import kernelspec as ks
+
+from .utils import kinfo_exe, rexists
+
+
+def _read_json(kernel_path):
+    with open(join(kernel_path, "kernel.json")) as f:
+        return json.load(f)
+    return None
+
+
+def _is_valid_kernel(kinfo):
+    ex = kinfo_exe(kinfo[1])
+    return exists(ex[0]) and (ex[1] is None or rexists(ex[2], ex[1]))
+
+
+def get_kernel_desc(all=False, valid_only=True):
+    km = ks.KernelSpecManager()
+    kdirs = km.find_kernel_specs()
+    keys = sorted(
+        kdirs.keys() if all else filter(lambda k: k.startswith("ssh_"), kdirs.keys())
+    )
+    result = {
+        k: {"ssh": k.startswith("ssh_"), "path": kdirs[k], "spec": _read_json(kdirs[k])}
+        for k in keys
+    }
+    if not valid_only:
+        return result
+
+    return dict(filter(_is_valid_kernel, result.items()))
 
 
 def _red(s):
@@ -19,7 +48,7 @@ def _kernel_paths(kinfo):
         if len(k) > colsize:
             colsize = len(k)
     for k, info in kinfo.items():
-        e = _exe(info)
+        e = kinfo_exe(info)
         if info["ssh"]:
             # remote kernel spec
             # e[0] => local python path
@@ -98,7 +127,7 @@ def _local_paths(kinfo):
         if len(k) > colsize:
             colsize = len(k)
     for k, info in kinfo.items():
-        e = _exe(info)
+        e = kinfo_exe(info)
         # e[0] => local python path
         problems = []
         ok = True
@@ -133,7 +162,7 @@ def _remote_paths(kinfo):
         if len(k) > colsize:
             colsize = len(k)
     for k, info in kinfo.items():
-        e = _exe(info)
+        e = kinfo_exe(info)
         if info["ssh"]:
             # remote kernel spec
             # e[0] => local python path
@@ -171,8 +200,6 @@ def _remote_paths(kinfo):
 
 
 if __name__ == "__main__":
-    from .. import get_kernel_desc
-
     parse = ArgumentParser(add_help=False)
 
     optional = parse.add_argument_group("optional arguments")
