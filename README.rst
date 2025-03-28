@@ -1,215 +1,218 @@
 Remote Jupyter Kernels via SSH tunnels
 ######################################
 
+Why sshpyk?
+**********
+
+Data scientists and researchers often need to:
+
+* Run computations on powerful remote servers while using local notebooks
+* Access specialized hardware (GPUs, large memory) not available locally
+* Work with data that can't leave secure environments due to size or privacy
+* Maintain a consistent development environment across multiple machines
+
+sshpyk solves these problems by:
+
+* Creating secure SSH tunnels to remote Jupyter kernels with minimal configuration
+* Supporting modern Jupyter Client (7.0+) with its kernel provisioning API
+* Enabling passwordless, key-based authentication for seamless connections
+* Working with complex network setups including bastion/jump hosts
+
 The design of this package is based upon `SSH Kernel <https://github.com/bernhard-42/ssh_ipykernel>`_ which
-in turn is based upon `remote_ikernel <https://bitbucket.org/tdaff/remote_ikernel>`_. This implementation shares
-a common set of command line parameters with `SSH Kernel <https://github.com/bernhard-42/ssh_ipykernel>`_, but it was
-implemented from scratch to adapt to recent changes to :code:`jupyter_client` (which broke :code:`ssh_ipykernel`)
-and to support Python 3.10. This package adds an :code:`ls` implementation which allows listing info about the
-available kernel specifications.
+in turn is based upon `remote_ikernel <https://bitbucket.org/tdaff/remote_ikernel>`_. This implementation was
+created to adapt to recent changes to :code:`jupyter_client` (which broke :code:`ssh_ipykernel`)
+and to support Python 3.10+.
 
-While there are modest additions to `SSH Kernel <https://github.com/bernhard-42/ssh_ipykernel>`_, there are
-also modest subtractions. There are fewer configuration options for things like the internal name used
-by `Jupyter Client <https://jupyter-client.readthedocs.io/en/stable/#>`_ to refer to the created
-kernel.
+Installation
+***********
 
-Listing the Jupyter Kernels that are available
-**********************************************
+You can install sshpyk using pip::
 
-It can be difficult to know which Jupyter Kernels are available because there are multiple locations where
-the `Kernel Spec files <https://jupyter-client.readthedocs.io/en/latest/kernels.html#kernel-specs>`_ can be
-found. :code:`sshpyk` has an :code:`ls` option which lists the kernels that are available (even those which are
-**not** `SSH Kernel <https://github.com/bernhard-42/ssh_ipykernel>`_ or :code:`sshpyk` kernels::
+    pip install sshpyk
 
-  bash$
-  bash$ python -m sshpyk.kernel.ls --no-check -a
-  python3                                   /Users/drs/develop/python/conda/envs/py310/share/jupyter/kernels/python3
-  python3.8                                 /usr/local/share/jupyter/kernels/python3.8
-  python3dbg                                /Users/drs/Library/Jupyter/kernels/python3dbg
-  ssh__sshhost06test001                     /Users/drs/Library/Jupyter/kernels/ssh__sshhost06test001
-  ssh__sshhost06test002                     /Users/drs/Library/Jupyter/kernels/ssh__sshhost06test002
-  ssh_host06_host06homehost06condaenvspy310 /Users/drs/Library/Jupyter/kernels/ssh_host06_host06homehost06condaenvspy310
-  bash$
+For development installation::
 
-The :code:`--no-check` flag indicates that the validity of the kernel spec files
-should **not** be checked. The :code:`-a` (or :code:`--all`) flag indicates that it should show **all** kernel
-specifications rather than just the ones for `SSH Kernel <https://github.com/bernhard-42/ssh_ipykernel>`_ or
-:code:`sshpyk` kernel specification files.
+    pip install -e ".[dev]"
 
-If :code:`--no-check` is **not** supplied, part of listing the kernel information will include
-verify that the Python executable specified in the kernel specification exist on the local and remote systems.
-This check allows the output to be colorized so red text indicates a problem. :code:`--local` will limit the
-check to just the local Python executable and :code:`--remote` will limit the check to only the remote Python
-executable. These options also list the local or remote Python path **instead** of the path to the kernel
-specification directory.
+Requirements:
 
+* On the local system: :code:`sshpyk` and :code:`jupyter_client`
+* On the remote system: :code:`jupyter_client` (which provides :code:`jupyter-kernel` command)
 
-Command line "ls" options
+Managing Jupyter Kernels
+************************
+
+:code:`sshpyk` provides a command-line interface to manage remote Jupyter kernels via SSH tunnels.
+
+Listing Available Kernels
 =========================
 
-The following options are available for listing the Jupyter kernel specifications:
+You can list all available kernels using the :code:`list` command::
 
---help, -h
-^^^^^^^^^^
+  $ sshpyk list
+  Display Name                    | Name    | SSH Host | Path
+  --------------------------------+---------+----------+-------------------------------------------------------------
+  Python 3.10                     | f310    |          | /Users/victor/Library/Jupyter/kernels/f310
+  Python 3.9 Pipelines            | f39p    |          | /Users/victor/Library/Jupyter/kernels/f39p
+  Python 3 Tiago                  | f39t    |          | /Users/victor/Library/Jupyter/kernels/f39t
+  R                               | ir      |          | /opt/homebrew/anaconda3/envs/g/share/jupyter/kernels/ir
+  Python 3 (ipykernel)            | python3 |          | /opt/homebrew/anaconda3/envs/g/share/jupyter/kernels/python3
+  Python 3.9 (Remote MacBook Air) | ssh_p39 | mba      | /Users/victor/Library/Jupyter/kernels/ssh_p39
 
-              Show help information and exit.
+Adding a Remote Kernel
+======================
 
---all, -a
-^^^^^^^^^
+To add a new remote kernel, use the :code:`add` command. For a remote kernel to work:
 
-              List all kernels that are available rather than just
-              `SSH Kernel <https://github.com/bernhard-42/ssh_ipykernel>`_ and sshpyk kernels.
+* :code:`sshpyk` must be installed on the local system (which depends on :code:`jupyter_client` explicitly)
+* :code:`jupyter_client` must be installed on the remote system (which provides :code:`jupyter-kernel` command)
 
---local, -l
-^^^^^^^^^^^
+Here's the help information for the :code:`add` command::
 
-              Only list the information for the local Python executable.
+  $ sshpyk add --help
+  usage: sshpyk add [-h] [--kernel-name KERNEL_NAME] [--display-name DISPLAY_NAME] [--language LANGUAGE] --ssh-host-alias SSH_HOST_ALIAS --remote-python-prefix REMOTE_PYTHON_PREFIX
+                    --remote-kernel-name REMOTE_KERNEL_NAME [--remote-kernel-launch-timeout REMOTE_KERNEL_LAUNCH_TIMEOUT] [--replace]
 
---remote, -r
-^^^^^^^^^^^^
+  options:
+    -h, --help            show this help message and exit
+    --kernel-name KERNEL_NAME
+                          Name for the kernel (default: ssh_<host>_<remote_kernel>)
+    --display-name DISPLAY_NAME
+                          Display name for the kernel
+    --language LANGUAGE   Kernel language (default: python)
+    --ssh-host-alias SSH_HOST_ALIAS
+                          SSH host alias
+    --remote-python-prefix REMOTE_PYTHON_PREFIX
+                          Path to Python prefix on remote system
+    --remote-kernel-name REMOTE_KERNEL_NAME
+                          Kernel name on the remote system. Use `jupyter kernelspec list` on the remote system to find it.
+    --remote-kernel-launch-timeout REMOTE_KERNEL_LAUNCH_TIMEOUT
+                          Timeout for launching the remote kernel (default: 60)
+    --replace             Replace existing kernel with the same name if it exists
 
-              Only list the information for the remote Python executable.
-
---no-check
-^^^^^^^^^^
-
-              Do not check for the existence local or remote Python executables. This option
-              can be used alone or with other options, e.g. with :code:`-l`. :code:`--no-check`
-              avoids colorization to indicate problems so it can be useful for scripting.
-
---no-color
-^^^^^^^^^^
-
-              Do not colorize the listing to make it more convenient for processing output.
-
---verbose, -V
-^^^^^^^^^^^^^
-
-              Provide verbose output to make it easier to debug problems with kernel info.
-
-
-
-Adding a new Kernel for a Remote System
-***************************************
-
-:code:`sshpyk` can also be used to add a specification file for a remote Python Kernel. For a
-remote kernel to work
-
-* :code:`ssypyk` must be installed on the local system
-* :code:`ipykernel` must be installed on the remote system
-
-Once these requirements are satisfied, the new kernel can be added like::
-
-  bash$ python3 -m sshpyk.kernel.add --host host06 --python /home/host06/conda/envs/py310 --display-name 'host06 kernel'
-
-This will add a Python kernel which will run on :code:`host06`, and it will be called
-:code:`host06 kernel` when it is listed as an option for the user. We can check to see if it
-is now included by using the :code:`ls` functionality::
-
-  bash$ python3 -m sshpyk.kernel.ls -r -a --no-check
-  python3                                   localhost:python
-  python3.8                                 localhost:/opt/local/bin/python3.8
-  python3dbg                                localhost:/Users/drs/develop/casagui-ic-debugging/iclean_demo_venv/bin/python
-  ssh__sshhost06test001                     host06:/home/host06/conda/envs/py310/bin/python
-  ssh__sshhost06test002                     host06:/home/host06/conda/envs/py310/bin/python
-  ssh_host06_host06homehost06condaenvspy310 host06:/home/host06/conda/envs/py310/bin/python
-  ssh_host06_host06kernel                   host06:/home/host06/conda/envs/py310/bin/python
-  bash$
-
-Unlike the example above, here we have asked that the remote Python path be displayed
-instead of showing the kernel specification directory. Since we again asked that *all kernels*
-be displayed instead of only the SSH kernels, a Python path is displayed for the
-non-SSH kernels, but it is the local Python path as indicated by :code:`localhost:`.
-Because these three kernels are non-SSH kernels this is the only Python path that is
-available. However for the SSH kernels, we can see the remote Python path listed.
-These paths are prefixed with the hostname, here :code:`host06:`. We can also see
-the newly added kernel listed as :code:`ssh_host06_host06kernel`. This name is an internal
-name created from the :code:`--display-name` string which the end user will typically
-never see.
-
-Command line "add" options
+Editing an Existing Kernel
 ==========================
 
---help, -h
-^^^^^^^^^^
+You can modify an existing kernel using the :code:`edit` command::
 
-             Show help information and exit.
+  $ sshpyk edit --help
+  usage: sshpyk edit [-h] --kernel-name KERNEL_NAME [--display-name DISPLAY_NAME] [--language LANGUAGE] [--ssh-host-alias SSH_HOST_ALIAS] [--remote-python-prefix REMOTE_PYTHON_PREFIX]
+                     [--remote-kernel-name REMOTE_KERNEL_NAME] [--remote-kernel-launch-timeout REMOTE_KERNEL_LAUNCH_TIMEOUT]
 
---timeout TIMEOUT, -t TIMEOUT
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  options:
+    -h, --help            show this help message and exit
+    --kernel-name KERNEL_NAME
+                          Name of the kernel to edit
+    --display-name DISPLAY_NAME
+                          Display name for the kernel
+    --language LANGUAGE   Kernel language
+    --ssh-host-alias SSH_HOST_ALIAS
+                          SSH host alias
+    --remote-python-prefix REMOTE_PYTHON_PREFIX
+                          Path to Python prefix on remote system
+    --remote-kernel-name REMOTE_KERNEL_NAME
+                          Kernel name on the remote system. Use `jupyter kernelspec list` on the remote system to find it.
+    --remote-kernel-launch-timeout REMOTE_KERNEL_LAUNCH_TIMEOUT
+                          Timeout for launching the remote kernel
 
-             Specify timeout to wait for kernel startup text.
-             This option is **not used** by :code:`sshpyk`. It is only used by :code:`ssh_ipykernel`.
+Deleting a Kernel
+=================
 
---env [ENV ...], -e [ENV ...]
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+To remove a kernel, use the :code:`delete` command::
 
-             Specify environment variables for access by code executed within the remote Python
-             kernel the form: :code:`"NAME=VALUE"`
+  $ sshpyk delete --help
+  usage: sshpyk delete [-h] kernel_name
 
---display-name DISPLAY_NAME, -d DISPLAY_NAME
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  positional arguments:
+    kernel_name  Name of the kernel to delete
 
-             Specify the string to be used to describe this kernel to the end user.
+  options:
+    -h, --help   show this help message and exit
 
---session
-^^^^^^^^^
+SSH Configuration Notes
+**********************
 
-             Signal that session information should be stored in :code:`~/.sshpyk/sessions` for this kernel". This
-             option is **not used** by :code:`ssh_ipykernel`. Note that when :code:`--session` is used the terminal
-             output generated from the SSH connection is also directed to :code:`~/.sshpyk/sessions`.
+Understanding SSH Host Aliases
+=============================
 
---sudo, -s
-^^^^^^^^^^
+The :code:`--ssh-host-alias` parameter refers to host aliases defined in your SSH configuration, not IP addresses.
+These aliases provide a convenient way to manage connections to remote systems.
 
-             Use :code:`sudo` to start kernel on the remote machine.
-             This option is **not currently used** by :code:`sshpyk`. It is only used by :code:`ssh_ipykernel`.
+.. note::
+   Currently, Windows is not supported as either a local or remote machine.
 
+Basic SSH Config Setup
+=====================
 
---host HOST, -H HOST
-^^^^^^^^^^^^^^^^^^^^
+Your SSH configuration is typically stored in :code:`$HOME/.ssh/config`. A basic entry looks like::
 
-             The name of remote host as used to connect with SSH.
+  Host myserver
+    HostName 192.168.1.100 # IP address of the remote system
+    User myusername # your unix username on the remote system
+    Port 22 # this is the default
+    IdentityFile ~/.ssh/id_rsa # required for passwordless login
+    StrictHostKeyChecking no # optional, but recommended for automation
 
---python PATH, -p PATH
-^^^^^^^^^^^^^^^^^^^^^^
+With this configuration, you can use :code:`myserver` as your :code:`--ssh-host-alias` in sshpyk commands.
 
-             Path to remote python installation. This is the path to the root of the Python
-             installation so the Python executable would be found in :code:`<PATH>/bin/python`.
+Authentication Requirements
+==========================
 
+**Important**: sshpyk only supports passwordless SSH authentication. You must set up key-based authentication
+for all remote hosts you intend to use.
 
-SSH configuration notes
-=======================
+To set up passwordless SSH authentication:
 
-The host name used above is *different* from the Internet Protocol name for hosts which have
-a well defined address. It is also a name apart from the physical network where the host can
-be found. SSH allows for rationalizing the naming of the hosts to which you have access.
-This is done through the :code:`$HOME/.ssh/config` file.
+1. Generate an SSH key pair on your local machine (if you don't already have one)::
 
-The most useful configuration option with respect to :code:`sshpyk` is the ability to set
-up access to a host behind a `bastion host <https://en.wikipedia.org/wiki/Bastion_host>`_.
-Assuming, the host named :code:`host06` from above is behind a bastion host, a configuration
-entry in :code:`$HOME/.ssh/config` like::
+     ssh-keygen -t ed25519 -C "your_email@example.com"
 
-  Host host06
-    User HOST06-USERNAME
+2. Copy your public key to the remote server::
+
+     ssh-copy-id username@remote-host
+
+   Or manually add the contents of :code:`~/.ssh/id_ed25519.pub` to :code:`~/.ssh/authorized_keys` on the remote machine.
+
+3. Test your connection::
+
+     ssh remote-host
+
+   You should connect without being prompted for a password.
+
+Advanced: Using Bastion Hosts
+============================
+
+One powerful feature is the ability to connect to hosts behind a bastion (jump) server. For example in your SSH config::
+
+  Host bastion
+    HostName bastion.example.com
+    User bastion-username
+    IdentityFile ~/.ssh/id_rsa_bastion # required for passwordless login
+    StrictHostKeyChecking no # optional, but recommended for automation
+
+  Host internal_server
+    HostName internal-server.example.com
+    User remote-username
+    IdentityFile ~/.ssh/id_rsa_internal # required for passwordless login
     ForwardX11Trusted yes
-    ProxyCommand ssh BASTION-USERNAME@ssh.example.com -W %h:%p
+    StrictHostKeyChecking no # optional, but recommended for automation
+    ProxyJump bastion # this is the key line that enables the "jump" through the bastion
 
-will allow the *local* account to use its SSH credentials for the user name
-:code:`BASTION-USERNAME` on :code:`ssh.example.com` for access to :code:`host06` which
-is on some protected network behind :code:`ssh.example.com`. When the *local* account
-runs :code:`ssh host06`, SSH will first connect as :code:`BASTION-USERNAME` on
-:code:`ssh.example.com` and then it connect to host :code:`host06` as username
-:code:`HOST06-USERNAME`.
+This configuration allows you to:
 
-This sort of configuration will allow :code:`host06` to be allowed as a hostname
-for remote kernels.
+1. Connect first to :code:`bastion.example.com` as :code:`bastion-username`
+2. Then tunnel through to :code:`internal-server` as :code:`remote-username`
+
+When using sshpyk, you would simply specify :code:`--ssh-host-alias internal-server` and the SSH tunneling
+will be handled automatically according to your configuration.
+
+.. note::
+   Remember that passwordless authentication must be set up for both the bastion host and the internal server.
 
 Development
-###########
+##########
 
-In a Python 3.8 environment:
+In a Python 3.8+ environment:
 
 1. `pip install -e ".[dev]"` # installs the python package in editable mode
 2. Reload your shell, e.g. open the terminal again.
@@ -223,3 +226,17 @@ Run git hooks manually
 To auto-format code, apply other small fixes (e.g. trailing whitespace) and to lint all the code:
 
 `pre-commit run --all-files`
+
+Implementation Details
+*********************
+
+sshpyk integrates with Jupyter Client through the kernel provisioning API introduced in jupyter_client 7.0+.
+It implements a custom :code:`KernelProvisionerBase` subclass called :code:`SSHKernelProvisioner` that:
+
+1. Establishes SSH connections to remote hosts
+2. Sets up port forwarding for kernel communication channels
+3. Launches kernels on remote systems
+4. Manages the lifecycle of remote kernels
+
+The provisioner is registered as an entry point in :code:`pyproject.toml`, making it available to any
+Jupyter application that uses `jupyter_client`.
