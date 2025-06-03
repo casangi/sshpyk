@@ -1,6 +1,7 @@
 BSD 3-Clause License
 
 Copyright (c) 2024, Associated Universities, Inc.
+For inquiries contact  Associated Universities, Inc., 2650 Park Tower Drive Vienna, VA 22180, USA.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
