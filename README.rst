@@ -759,7 +759,7 @@ If you invoke ``sshpyk-kernel`` from a non-interactive shell, you can use signal
 * ``SIGKILL``: this signal cannot be caught, it will kill the local command without any local nor remote cleanup. Not recommended. Use only as last resort.
 
 Integration with Jupyter
-=======================
+========================
 
 The command is designed to work with Jupyter's kernel specification system.
 When you add a remote kernel using ``sshpyk add``, the command is automatically configured in the kernel spec file (``kernel.json``).
