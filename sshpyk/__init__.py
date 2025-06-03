@@ -1,8 +1,1 @@
-try:
-    from .__version__ import __version__
-except ImportError:
-    __version__ = "0.0"
-
-
-def version():
-    return __version__
+"""Remote Jupyter kernels via SSH tunnels."""

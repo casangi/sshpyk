@@ -1,0 +1,24 @@
+Host sshpyk_jump
+    User root
+    Hostname 192.168.238.1
+    # Using password based authentication is HIGHLY DISCOURAGED.
+    # Be 200% sure that you really have no alternative!
+    PreferredAuthentications keyboard-interactive,password
+
+Host sshpyk_host
+    Hostname 192.168.238.4
+    User victor
+    ProxyJump sshpyk_jump
+    IdentityFile /Users/victor/.ssh/id_rsa_for_localhost
+
+# This will be applied to all hosts.
+Host *
+    ControlMaster auto
+    ControlPath ~/.ssh/sshpyk_%r@%h_%p
+    ControlPersist 10m
+    StrictHostKeyChecking no
+    ServerAliveInterval 5
+    ServerAliveCountMax 120000
+    TCPKeepAlive yes
+    ConnectionAttempts 1
+    ConnectTimeout 5

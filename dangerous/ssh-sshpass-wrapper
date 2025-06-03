@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+
+# ! The use of script is HIGHLY DISCOURAGED! Especially if you just got started with SSH!
+# ! It is provided as a last resort solution and most people should not need it at all!
+# ! It is HIGHLY RECOMMENDED to get advice from your remote system's administrator.
+# ! They are able to provide guidance on secure automated ways to connect to their systems.
+
+# * This script has been tested with homebrew's sshpass 1.10 on macOS 13.7.x
+
+# NB some versions of SSH don't print the "host" key that has the host alias name.
+# Thus it is safer to check for "hostname" instead.
+jump_hostname="192.168.238.1"
+jump_alias="sshpyk_jump"
+ssh_config_file="/Users/victor/Documents/ProjectsDev/ncl/sshpyk/dangerous/config"
+SSH_EXECUTABLE="/opt/homebrew/bin/ssh"
+
+ssh_config=$($SSH_EXECUTABLE -G "$@")
+# Both the Bastion and the target end host might require the password of the Bastion.
+# So you need to check for both the "HostName" and the "ProxyJump" keys.
+if echo "$ssh_config" | grep -qi "HostName $jump_hostname" || echo "$ssh_config" | grep -qi "ProxyJump $jump_alias"; then
+    echo "[SSH WRAPPER] This connection might require a password"
+    # This example uses macOS's `security` command to read the password from the keychain.
+    # `SSHPASS` is the default environment variable used by `sshpass`.
+    # ! DO NOT PUT YOUR PASSWORD HERE IN PLAIN TEXT!
+    # ! USE A KEYCHAIN MECHANISM TO STORE IT SECURELY AND THEN RETRIEVE IT HERE.
+    export SSHPASS=$(security find-generic-password -a "$jump_alias" -w)
+    # Run a dummy command that will create the control socket (if needed).
+    # This assumes that ControlMaster is set to auto in the ssh_config_file.
+    # ! WARNING: do NOT send this command to the background, it will most likely fail
+    # ! to create the control socket.
+    $SSH_EXECUTABLE -F $ssh_config_file -O check $jump_alias >/dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        echo "[SSH WRAPPER] Control socket does not exist, running dummy command to create it"
+        # ! `</dev/null` is essential otherwise `sshpass` will mess up the stdin and break pipes.
+        # E.g. if a python process calls this script the stdin pipe will be crippled.
+        sshpass -e $SSH_EXECUTABLE -F $ssh_config_file $jump_alias true </dev/null
+    else
+        echo "[SSH WRAPPER] Control socket already exists, skipping dummy command"
+    fi
+fi
+
+echo "[SSH WRAPPER] Running the actual command: $SSH_EXECUTABLE $@"
+exec $SSH_EXECUTABLE "$@"

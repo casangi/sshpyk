@@ -3,12 +3,23 @@ name = "sshpyk"
 dynamic = ["version"]
 description = "remote jupyter kernels via ssh tunnels"
 authors = [
-    {name = "National Radio Astronomy Observatory", email = "casa-feedback@nrao.edu"},
+    { name = "National Radio Astronomy Observatory", email = "casa-feedback@nrao.edu" },
 ]
-dependencies = [ "jupyter-client" ]
+# Confirmed to work on jupyter-client 8.6.3
+dependencies = ["jupyter-client>=7.0"]
 requires-python = ">=3.8"
 readme = "README.rst"
-license = {text = "BSD-3-Clause"}
+license = { text = "BSD-3-Clause" }
+
+[project.scripts]
+sshpyk = "sshpyk.cli:main"
+sshpyk-kernel = "sshpyk.kernelapp:main"
+
+# Integrate with Jupyter Client
+[project.entry-points."jupyter_client.kernel_provisioners"]
+sshpyk-provisioner = "sshpyk.provisioning:SSHKernelProvisioner"
+
+# Dev config
 
 [project.optional-dependencies]
 dev = ["pre-commit"]
@@ -19,7 +30,7 @@ dev = ["pre-commit"]
 [tool.pdm.version]
 source = "scm"
 write_to = "sshpyk/__version__.py"
-write_template = "__version__ = '{}'"  # optional, default to "{}"
+write_template = "__version__ = '{}'" # optional, default to "{}"
 
 [build-system]
 requires = ["pdm-pep517>=0.12.0"]
