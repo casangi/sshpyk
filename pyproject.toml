@@ -11,6 +11,11 @@ requires-python = ">=3.8"
 readme = "README.rst"
 license = { text = "BSD-3-Clause" }
 
+[project.urls]
+"Homepage" = "https://github.com/casangi/sshpyk?tab=readme-ov-file#remote-jupyter-kernels-via-ssh"
+"Source" = "https://github.com/casangi/sshpyk"
+"Bug Tracker" = "https://github.com/casangi/sshpyk/issues"
+
 [project.scripts]
 sshpyk = "sshpyk.cli:main"
 sshpyk-kernel = "sshpyk.kernelapp:main"
