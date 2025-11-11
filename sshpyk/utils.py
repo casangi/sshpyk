@@ -217,7 +217,7 @@ def validate_ssh_config(config: Dict[str, Union[str, List[str]]]):
     if "identityfile" in keys:
         id_file = config.get("identityfile", None)
         if id_file:
-            fp = Path(id_file).resolve()  # type: ignore
+            fp = Path(id_file).expanduser().resolve()  # type: ignore
             if fp.exists():
                 out["identityfile"] = ("ok", str(fp))
             else:
