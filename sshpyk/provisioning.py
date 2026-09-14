@@ -9,6 +9,11 @@ import uuid
 from enum import Enum, unique
 from itertools import dropwhile
 from pathlib import Path
+from pathlib import PurePosixPath  # remote_python lives on the remote (POSIX) host,
+                                   # not the local machine sshpyk itself runs on --
+                                   # deliberately PurePosixPath, not bare Path, so
+                                   # this stays correct even if the local sshpyk
+                                   # client ever runs on a non-POSIX OS.
 from signal import SIGINT, SIGKILL, SIGTERM
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -879,6 +884,8 @@ class SSHKernelProvisioner(KernelProvisionerBase):
         # Just a line that can will echoed by the remote script and will show up in the
         # local logs if the remote script starts running.
         msg = 'print("[SSHPYK]")'
+        # Remote PYTHONPATH
+        remote_pythonhome = PurePosixPath(self.remote_python).parent.parent
         # Use `nohup` to ensure the remote kernel is not killed when we detach from the
         # remote machine.
         # `exec` ensures the `cmd` will have the same PID output by `echo $$`.
@@ -892,6 +899,9 @@ class SSHKernelProvisioner(KernelProvisionerBase):
             f'echo "{PY_CHECK}=$?"',
             # Print the PID of the remote SSHKernelApp process
             f'echo "{PID_KA}=$$"',
+            # Without setting PYTHONHOME, we have observed 50s spent in a
+            # stat('/home/lib/python312.zip') call w/ autofs.
+            f'export PYTHONHOME="{remote_pythonhome}"',
             # Launch the SSHKernelApp
             f"exec nohup $FP_PY -c 'import sys; {msg}; exec(sys.stdin.read())'",
         ]
