@@ -18,6 +18,19 @@ from traitlets import Bool, Integer, Unicode
 from traitlets import Enum as EnumTrait
 from traitlets.config.loader import Config
 
+ORIGINAL_PYTHONHOME_ENV = "SSHPYK_ORIGINAL_PYTHONHOME"
+
+# The remote launcher temporarily sets PYTHONHOME so CPython does not search for
+# installation landmarks. Restore the pre-existing value before this application can
+# launch the remote kernel or any other child process.
+_original_pythonhome = os.environ.pop(ORIGINAL_PYTHONHOME_ENV, None)
+if _original_pythonhome is not None:
+    if _original_pythonhome:
+        os.environ["PYTHONHOME"] = _original_pythonhome
+    else:
+        os.environ.pop("PYTHONHOME", None)
+del _original_pythonhome
+
 LEAVE_HELP = """
 Launch remote kernel, leave it running, and exit this SSHKernelApp.
 When set to True, it provides a way to skip having to interact with the
@@ -56,6 +69,18 @@ SSH_VERBOSE = dict(
 )
 
 
+def _set_kernel_pythonhome(kernel_spec: Any, pythonhome: str, log: Any) -> None:
+    """Set an explicit kernel PYTHONHOME, overriding the kernelspec value."""
+    previous = kernel_spec.env.get("PYTHONHOME")
+    if previous and previous != pythonhome:
+        log.warning(
+            "Overriding remote kernelspec PYTHONHOME=%r with %r",
+            previous,
+            pythonhome,
+        )
+    kernel_spec.env["PYTHONHOME"] = pythonhome
+
+
 class SSHKernelApp(JupyterApp):
     """Launch a kernel by its local name."""
 
@@ -83,6 +108,15 @@ class SSHKernelApp(JupyterApp):
         config=True,
         help="The name of a kernel type to start",
         allow_none=False,
+    )
+    remote_kernel_pythonhome = Unicode(
+        config=True,
+        help="Optional PYTHONHOME for the launched kernel, useful for avoiding slow "
+        "CPython landmark searches on autofs filesystems. The value overrides "
+        "PYTHONHOME from the inherited environment and remote kernelspec, and is "
+        "inherited by processes started by the kernel.",
+        allow_none=True,
+        default_value=None,
     )
     capture_stdin = Bool(
         True,
@@ -128,6 +162,11 @@ class SSHKernelApp(JupyterApp):
         self.log.debug(f"{self.config = }")
 
         self.km = KernelManager(kernel_name=self.kernel_name, config=self.config)
+        if self.remote_kernel_pythonhome:
+            kernel_spec = self.km.kernel_spec
+            if kernel_spec is None:
+                raise RuntimeError(f"Could not load kernel spec {self.kernel_name!r}")
+            _set_kernel_pythonhome(kernel_spec, self.remote_kernel_pythonhome, self.log)
 
         self.loop = IOLoop.current()
 

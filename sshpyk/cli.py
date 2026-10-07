@@ -48,7 +48,7 @@ K_SSH = "SSH Host Alias:"
 K_CONN = "SSH Connection:"
 K_SSH_CONFIG = "SSH Config File:"
 K_SSH_PATH = "SSH Path:"
-K_EXE = "Remote Python:"
+K_EXE = "Remote Launcher Python:"
 K_RKER = "Remote Kernel Name:"
 K_RLANG = "Remote Language:"
 K_TIME = "Launch Timeout:"
@@ -58,6 +58,8 @@ K_INT = "Interrupt Mode:"
 K_RINT = "Remote Interrupt Mode:"
 K_RRES = "Remote Resource Dir:"
 K_RUNAME = "Remote System:"
+K_PYHOME = "Remote Launcher PYTHONHOME:"
+K_RKPYHOME = "Remote Kernel PYTHONHOME:"
 
 DEFAULT_SSH_CONFIG_PATH = str(Path.home() / ".ssh" / "config")
 
@@ -74,7 +76,9 @@ ALL_KEYS = [
     K_SSH_PATH,
     K_RUNAME,
     K_EXE,
+    K_PYHOME,
     K_RKER,
+    K_RKPYHOME,
     K_RLANG,
     K_TIME,
     K_TIME_SD,
@@ -177,7 +181,9 @@ def extract_ssh_kernel_info(
         "language": language,
         "host": config.get("ssh_host_alias", ""),
         "remote_python": config.get("remote_python", ""),
+        "remote_pythonhome": config.get("remote_pythonhome", ""),
         "remote_kernel_name": config.get("remote_kernel_name", ""),
+        "remote_kernel_pythonhome": config.get("remote_kernel_pythonhome", ""),
         "launch_timeout": config.get("launch_timeout", LAUNCH_TIMEOUT),
         "shutdown_timeout": config.get("shutdown_timeout", SHUTDOWN_TIME),
         "interrupt_mode": interrupt_mode,
@@ -381,8 +387,14 @@ def format_ssh_kernel_info(k_lines, kernel, check_res):
         k_lines.append(f"{C}{K_RINT:<{K_LEN}}{N} {check_res['interrupt_mode_remote']}")
     c = format_check(check_res["exec_ok"])
     k_lines.append(f"{C}{K_EXE:<{K_LEN}}{N} {c} {kernel['remote_python']}")
+    if kernel["remote_pythonhome"]:
+        k_lines.append(f"{C}{K_PYHOME:<{K_LEN}}{N} {kernel['remote_pythonhome']}")
     c = format_check(check_res["kernel_ok"])
     k_lines.append(f"{C}{K_RKER:<{K_LEN}}{N} {c} {kernel['remote_kernel_name']}")
+    if kernel["remote_kernel_pythonhome"]:
+        k_lines.append(
+            f"{C}{K_RKPYHOME:<{K_LEN}}{N} {kernel['remote_kernel_pythonhome']}"
+        )
     k_lines.append(f"{C}{K_TIME:<{K_LEN}}{N} {kernel['launch_timeout']}")
     k_lines.append(f"{C}{K_TIME_SD:<{K_LEN}}{N} {kernel['shutdown_timeout']}")
     if check_res.get("remote_cmd"):
@@ -466,6 +478,10 @@ def add_kernel(args: argparse.Namespace) -> None:
         config["launch_timeout"] = args.launch_timeout
     if args.shutdown_timeout:
         config["shutdown_timeout"] = args.shutdown_timeout
+    if args.remote_pythonhome:
+        config["remote_pythonhome"] = args.remote_pythonhome
+    if args.remote_kernel_pythonhome:
+        config["remote_kernel_pythonhome"] = args.remote_kernel_pythonhome
 
     fp_sk = Path(sys.executable).parent / "sshpyk-kernel"
     if not fp_sk.is_file():
@@ -548,6 +564,8 @@ def edit_kernel(args: argparse.Namespace) -> None:
 
     if args.remote_python:
         config["remote_python"] = args.remote_python
+    if args.remote_pythonhome:
+        config["remote_pythonhome"] = args.remote_pythonhome
 
     if args.remote_kernel_name:
         if not RGX_KERNEL_NAME.match(args.remote_kernel_name):
@@ -555,6 +573,8 @@ def edit_kernel(args: argparse.Namespace) -> None:
             print(f"Must match pattern: {RGX_KERNEL_NAME.pattern}")
             sys.exit(1)
         config["remote_kernel_name"] = args.remote_kernel_name
+    if args.remote_kernel_pythonhome:
+        config["remote_kernel_pythonhome"] = args.remote_kernel_pythonhome
 
     if args.launch_timeout:
         config["launch_timeout"] = args.launch_timeout
@@ -646,18 +666,28 @@ def main() -> None:
     add_parser.add_argument(
         "--remote-python",
         required=True,
-        help="Path to the Python executable on the remote system. Run `which python` "
-        "on the remote system to find its path. If the remote kernel is part of a "
-        "virtual environment (e.g. conda env), first activate your virtual "
-        "environment and then run `which python`. Note that `jupyter_client` "
-        "package must be installed on the remote. You can confirm it with "
-        "`python -m pip show jupyter_client'.",
+        help="Path to the remote Python used to run SSHKernelApp. It need not be the "
+        "Python used by the remote kernel, which is defined by the selected remote "
+        "kernelspec. This launcher Python must have jupyter_client installed.",
+    )
+    add_parser.add_argument(
+        "--remote-pythonhome",
+        help="Optional PYTHONHOME used only to initialize the remote SSHKernelApp, "
+        "avoiding slow CPython landmark searches on autofs filesystems. The previous "
+        "remote PYTHONHOME is restored before the kernel is launched.",
     )
     add_parser.add_argument(
         "--remote-kernel-name",
         required=True,
-        help="Kernel name on the remote system (i.e. first column of "
-        "`jupyter-kernelspec list` on the remote system).",
+        help="Kernel name on the remote system (the first column of `jupyter "
+        "kernelspec list`). Its kernelspec argv defines the actual kernel executable.",
+    )
+    add_parser.add_argument(
+        "--remote-kernel-pythonhome",
+        help="Optional PYTHONHOME for the executable selected by the remote "
+        "kernelspec, avoiding slow CPython landmark searches on autofs filesystems. "
+        "It overrides inherited and kernelspec values and is inherited by kernel "
+        "child processes.",
     )
     add_parser.add_argument(
         "--launch-timeout",
@@ -706,17 +736,27 @@ def main() -> None:
     )
     edit_parser.add_argument(
         "--remote-python",
-        help="Path to the Python executable on the remote system. Run `which python` "
-        "on the remote system to find its path. If the remote kernel is part of a "
-        "virtual environment (e.g. conda env), first activate your virtual "
-        "environment and then run `which python`. Note that `jupyter_client` "
-        "package must be installed on the remote. You can confirm it with "
-        "`python -m pip show jupyter_client'.",
+        help="Path to the remote Python used to run SSHKernelApp. It need not be the "
+        "Python used by the remote kernel, which is defined by the selected remote "
+        "kernelspec. This launcher Python must have jupyter_client installed.",
+    )
+    edit_parser.add_argument(
+        "--remote-pythonhome",
+        help="Optional PYTHONHOME used only to initialize the remote SSHKernelApp, "
+        "avoiding slow CPython landmark searches on autofs filesystems. The previous "
+        "remote PYTHONHOME is restored before the kernel is launched.",
     )
     edit_parser.add_argument(
         "--remote-kernel-name",
-        help="Kernel name on the remote system (i.e. first column of "
-        "`jupyter-kernelspec list` on the remote system).",
+        help="Kernel name on the remote system (the first column of `jupyter "
+        "kernelspec list`). Its kernelspec argv defines the actual kernel executable.",
+    )
+    edit_parser.add_argument(
+        "--remote-kernel-pythonhome",
+        help="Optional PYTHONHOME for the executable selected by the remote "
+        "kernelspec, avoiding slow CPython landmark searches on autofs filesystems. "
+        "It overrides inherited and kernelspec values and is inherited by kernel "
+        "child processes.",
     )
     edit_parser.add_argument(
         "--launch-timeout",
