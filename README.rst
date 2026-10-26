@@ -136,10 +136,14 @@ If you are sure that the remote ``sshd`` does not allow authentication via priva
 
   sshpyk add --ssh-host-alias remote_server_sshpyk \
               --kernel-name ssh_remote_python3 \
-              --display-name "Remote Python 3.10" \
-              --remote-python /path/to/python/env \
-              --remote-kernel-name python3 \
+              --display-name "Remote Python 3.12" \
+              --remote-python /opt/conda/envs/sshpyk-launcher/bin/python \
+              --remote-kernel-name python312 \
               --language python
+
+Here, ``--remote-python`` runs sshpyk's management application on the remote host.
+``--remote-kernel-name python312`` names an already installed remote kernelspec, whose ``argv`` defines the
+executable used by the actual kernel. These can be different Python environments.
 
 See `Adding a Remote Kernel`_ for all available options.
 
@@ -257,7 +261,7 @@ You can list all available kernels using the ``list`` command:
   SSH Connection:        (v) sshpyk_mba
   Remote System:         Darwin MacBook-Air 20.5.0 Darwin Kernel Version 20.5.0: Sat May  8 05:10:33 PDT 2021; root:xnu-7195.121.3~9/RELEASE_X86_64 x86_64
   Remote Interrupt Mode: signal
-  Remote Python:         (v) /usr/local/anaconda3/envs/f39/bin/python
+  Remote Launcher Python: (v) /usr/local/anaconda3/envs/f39/bin/python
   Remote Kernel Name:    (v) python3
   Launch Timeout:        15
   Shutdown Timeout:      15
@@ -283,7 +287,7 @@ You can list all available kernels using the ``list`` command:
                             (x) controlpath: Missing, use, e.g., '~/.ssh/sshpyk_%r@%h_%p'.
   Remote Script Dir:     (?) $HOME/.ssh/sshpyk
   SSH Connection:        (x) sshpyk_mbp
-  Remote Python:         (?) /opt/homebrew/anaconda3/envs/g/bin/python
+  Remote Launcher Python: (?) /opt/homebrew/anaconda3/envs/g/bin/python
   Remote Kernel Name:    (?) python3
   Launch Timeout:        15
   Shutdown Timeout:      15
@@ -308,7 +312,7 @@ You can list all available kernels using the ``list`` command:
                             (x) controlpath: Missing, use, e.g., '~/.ssh/sshpyk_%r@%h_%p'.
   Remote Script Dir:     (?) $HOME/.ssh/sshpyk
   SSH Connection:        (x) sshpyk_mbp_ext
-  Remote Python:         (?) /opt/homebrew/anaconda3/envs/g/bin/python
+  Remote Launcher Python: (?) /opt/homebrew/anaconda3/envs/g/bin/python
   Remote Kernel Name:    (?) python3
   Launch Timeout:        15
   Shutdown Timeout:      15
@@ -319,13 +323,102 @@ Adding a Remote Kernel
 To add a new remote kernel, use the ``add`` command. For a remote kernel to work:
 
 * ``sshpyk`` must be installed on the local system (which depends on ``jupyter_client`` explicitly)
-* ``jupyter_client`` must be installed on the remote system
+* ``jupyter_client`` must be installed in the remote launcher environment selected by
+  ``--remote-python``
 
 Here's the help information for the ``add`` command:
 
 .. code-block:: bash
 
   $ sshpyk add --help
+
+Remote Launcher and Kernel Environments
+---------------------------------------
+
+There are two remote processes:
+
+* ``--remote-python`` is the Python executable used to run the remote
+  ``SSHKernelApp``. Its python environment must have ``jupyter_client`` installed.
+* ``--remote-kernel-name`` selects a remote Jupyter kernelspec. That kernelspec's
+  ``argv`` defines the executable used by the remote kernel. It may be a different
+  Python environment or a non-Python program altogether.
+
+For example, a lightweight ``--remote-python sshpyk-launcher`` environment can run ``SSHKernelApp``
+while the selected ``--remote-kernel-name python312`` kernelspec starts a Python kernel from a separate remote environment.
+
+PYTHONHOME and autofs
+---------------------
+
+During startup, CPython (the most common python implementation) determines its installation prefix and standard-library paths
+by probing for landmark files. One such landmark is the versioned standard-library ZIP, ``lib/python312.zip``. If a this landmark is absent, CPython may inspect multiple
+parent directories. A failed filesystem lookup is normally
+cheap, but on systems using ``autofs`` it can trigger an automount lookup. A probe such
+as ``/home/lib/python312.zip`` can then block interpreter startup for many seconds (50 s has been observed on some systems) even
+though the ZIP is not expected to exist.
+
+For example, an otherwise harmless failed lookup can become the dominant part of
+startup when ``/home`` is managed by ``autofs``::
+
+  stat("/home/lib/python312.zip", ...) = -1 ENOENT (...) <49.266501>
+
+Setting ``PYTHONHOME`` supplies the prefix directly and avoids that discovery walk.
+sshpyk provides separate optional settings because the launcher and kernel may use
+different Python installations:
+
+* ``--remote-pythonhome`` sets ``PYTHONHOME`` while the remote ``SSHKernelApp``
+  interpreter initializes. Before the application launches the kernel, sshpyk removes
+  its injected value and restores any ``PYTHONHOME`` that was already present in the
+  remote environment. The injected value is therefore not automatically inherited by
+  the remote kernel.
+* ``--remote-kernel-pythonhome`` sets ``PYTHONHOME`` for the remote kernel itself. This
+  explicitly configured value overrides both an inherited ``PYTHONHOME`` and a
+  ``PYTHONHOME`` in the remote kernelspec. It remains in the kernel environment and is
+  inherited by processes that the kernel starts. It applies to initial launches and
+  restarts regardless of the kernel's declared language.
+
+Set only the option needed by the affected interpreter. Both values use the same
+remote-path conventions as ``--remote-python``. This example deliberately uses
+different environments for the launcher and kernel:
+
+First, register the kernel environment on the remote host:
+
+.. code-block:: bash
+
+  /opt/conda/envs/myenvp312/bin/python -m ipykernel install --user \
+      --name myenvp312-python --display-name "My Python 3.12"
+
+Then create the sshpyk kernelspec on the local host:
+
+.. code-block:: bash
+
+  sshpyk add --ssh-host-alias remote_server_sshpyk \
+              --kernel-name ssh_remote_python3 \
+              --display-name "Remote Python 3.12" \
+              --remote-python /opt/conda/envs/sshpyk-launcher/bin/python \
+              --remote-pythonhome /opt/conda/envs/sshpyk-launcher \
+              --remote-kernel-name myenvp312-python \
+              --remote-kernel-pythonhome /opt/conda/envs/myenvp312 \
+              --language python
+
+In this example, the remote ``myenvp312-python`` kernelspec contains a command similar to:
+
+.. code-block:: json
+
+  {
+    "argv": [
+      "/opt/conda/envs/myenvp312/bin/python",
+      "-m",
+      "ipykernel_launcher",
+      "-f",
+      "{connection_file}"
+    ],
+    "display_name": "My Python 3.12",
+    "language": "python"
+  }
+
+``--remote-kernel-pythonhome`` is normally only useful when the selected kernelspec
+starts CPython. Omit it for a non-Python kernel unless that kernel intentionally starts
+Python subprocesses that require the configured home.
 
 Editing an Existing Kernel
 ==========================
@@ -776,7 +869,7 @@ Example ``kernel.json`` created by ``sshpyk add``:
       "--SSHKernelApp.kernel_name=demo_remote",
       "--KernelManager.connection_file='{connection_file}'"
     ],
-    "display_name": "Python 3.9 (Remote Demo)",
+    "display_name": "Python 3.12 (Remote)",
     "language": "python",
     "interrupt_mode": "message",
     "metadata": {
@@ -785,12 +878,19 @@ Example ``kernel.json`` created by ``sshpyk add``:
         "config": {
           "ssh": null,
           "ssh_host_alias": "sshpyk_mba",
-          "remote_python": "/usr/local/anaconda3/envs/f39/bin/python",
-          "remote_kernel_name": "python3"
+          "remote_python": "/opt/conda/envs/sshpyk-launcher/bin/python",
+          "remote_pythonhome": "/opt/conda/envs/sshpyk-launcher",
+          "remote_kernel_name": "myenvp312",
+          "remote_kernel_pythonhome": "/opt/conda/envs/myenvp312"
         }
       }
     }
   }
+
+The ``argv`` at the top of this local kernelspec starts the local ``sshpyk-kernel``
+command. On the remote host, ``remote_python`` starts ``SSHKernelApp``. Finally,
+``remote_kernel_name`` selects the remote kernelspec whose own ``argv`` starts the
+actual kernel. None of those three executable paths is required to be the same.
 
 Programmatic Usage in Python
 ============================

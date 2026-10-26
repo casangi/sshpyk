@@ -19,7 +19,13 @@ from jupyter_core.paths import jupyter_runtime_dir, secure_write
 from traitlets import Bool, Integer, Unicode
 from traitlets import Enum as EnumTrait
 
-from .kernelapp import EXISTING, PERSISTENT, PERSISTENT_FILE, SSH_VERBOSE
+from .kernelapp import (
+    EXISTING,
+    ORIGINAL_PYTHONHOME_ENV,
+    PERSISTENT,
+    PERSISTENT_FILE,
+    SSH_VERBOSE,
+)
 from .utils import (
     LAUNCH_TIMEOUT,
     RGX_UNAME_PREFIX,
@@ -91,6 +97,8 @@ def is_zombie(state: str) -> bool:
 class UnicodePath(Unicode):
     def validate(self, obj, value):
         value = super().validate(obj, value)
+        if value is None:
+            return value
         try:
             Path(value)  # should raise if not a valid path
             return value
@@ -146,19 +154,37 @@ class SSHKernelProvisioner(KernelProvisionerBase):
     )
     remote_python = UnicodePath(
         config=True,
-        help="Path to the Python executable on the remote system. "
-        "Run `which python` on the remote system to find its path. "
-        "If the remote kernel is part of a virtual environment (e.g. conda env), "
-        "first activate your virtual environment and then run `which python`. "
-        "Note that `jupyter_client` package must be installed on the remote. "
-        "You can confirm it with `python -m pip show jupyter_client'.",
+        help="Path to the remote Python executable used to run SSHKernelApp. "
+        "This need not be the Python used by the remote kernel; that executable is "
+        "defined by the selected remote kernelspec. The `jupyter_client` package "
+        "must be installed for this launcher Python.",
         allow_none=False,
+    )
+    remote_pythonhome = UnicodePath(
+        config=True,
+        help="Optional PYTHONHOME used only while starting the remote SSHKernelApp. "
+        "It can avoid slow CPython landmark searches on autofs filesystems. After "
+        "Python initializes, sshpyk restores the remote environment's original "
+        "PYTHONHOME before launching the remote kernel.",
+        allow_none=True,
+        default_value=None,
     )
     remote_kernel_name = KernelName(
         config=True,
-        help="Kernel name on the remote system "
-        "(i.e. first column of `jupyter kernelspec list` on the remote system).",
+        help="Kernel name on the remote system (the first column of `jupyter "
+        "kernelspec list`). The remote kernelspec's argv defines the actual kernel "
+        "executable independently of remote_python.",
         allow_none=False,
+    )
+    remote_kernel_pythonhome = UnicodePath(
+        config=True,
+        help="Optional PYTHONHOME for the executable selected by the remote "
+        "kernelspec. It can avoid slow CPython landmark searches on autofs "
+        "filesystems. This value overrides both an inherited PYTHONHOME and "
+        "PYTHONHOME configured by the remote kernelspec, and remains available to "
+        "processes started by the kernel.",
+        allow_none=True,
+        default_value=None,
     )
     launch_timeout = Integer(
         default_value=LAUNCH_TIMEOUT,
@@ -857,6 +883,11 @@ class SSHKernelProvisioner(KernelProvisionerBase):
             # the local `--debug`.
             "--debug",
         ]
+        if self.remote_kernel_pythonhome:
+            args_patch.append(
+                "--SSHKernelApp.remote_kernel_pythonhome="
+                f"{self.remote_kernel_pythonhome}"
+            )
         # When we restart the kernel use the same connection file and key, otherwise it
         # will be different and there is an unhandled exception in the local jupyter
         # server.
@@ -876,9 +907,10 @@ class SSHKernelProvisioner(KernelProvisionerBase):
             # Only reuse the same remote connection file on restarts.
             args_patch.append(f'--KernelManager.connection_file="{self.rem_conn_fp}"')
 
-        # Just a line that can will echoed by the remote script and will show up in the
+        # Just a line that will be echoed by the remote script and will show up in the
         # local logs if the remote script starts running.
         msg = 'print("[SSHPYK]")'
+        python_cmd = f"import sys; {msg}; exec(sys.stdin.read())"
         # Use `nohup` to ensure the remote kernel is not killed when we detach from the
         # remote machine.
         # `exec` ensures the `cmd` will have the same PID output by `echo $$`.
@@ -892,9 +924,19 @@ class SSHKernelProvisioner(KernelProvisionerBase):
             f'echo "{PY_CHECK}=$?"',
             # Print the PID of the remote SSHKernelApp process
             f'echo "{PID_KA}=$$"',
-            # Launch the SSHKernelApp
-            f"exec nohup $FP_PY -c 'import sys; {msg}; exec(sys.stdin.read())'",
         ]
+        if self.remote_pythonhome:
+            # Preserve an independently configured remote PYTHONHOME. The injected
+            # value is needed only for CPython's path initialization and must not leak
+            # into the SSHKernelApp's child processes.
+            cmd_parts += [
+                # `${PYTHONHOME-}` expands to an empty string when PYTHONHOME is unset,
+                # including under `set -u`; doubled braces escape this Python f-string.
+                f'export {ORIGINAL_PYTHONHOME_ENV}="${{PYTHONHOME-}}"',
+                f'export PYTHONHOME="{self.remote_pythonhome}"',
+            ]
+        # The SSHKernelApp restores PYTHONHOME before it can launch child processes.
+        cmd_parts.append(f"exec nohup $FP_PY -c '{python_cmd}'")
         # We already checked in `pre_launch()`
         # // await self.check_control_sockets()
         cmd = "; ".join(cmd_parts)
